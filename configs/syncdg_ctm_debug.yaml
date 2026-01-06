@@ -2,8 +2,10 @@ seed: 42
 
 data:
   dataset: BNCI2014_001
-  tmin: 2.0
-  tmax: 6.0
+  # MOABB tmin/tmax are relative to dataset.interval[0] (BNCI2014_001 interval is [2,6]).
+  # So tmin=0,tmax=4 corresponds to the 2–6s MI window.
+  tmin: 0.0
+  tmax: 4.0
   fmin: 4.0
   fmax: 38.0
   resample: null
@@ -68,4 +70,3 @@ dg:
 early_exit:
   tau_g: 1.0
   tau_L: 1.0
-

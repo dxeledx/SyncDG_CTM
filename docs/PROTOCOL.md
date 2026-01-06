@@ -10,7 +10,9 @@
 - **Inner split for early-stopping / model selection**: leave-one-*source*-subject-out (a held-out source subject as *source-val*).
 
 ## Preprocessing
-- window: 2–6s (relative to cue, per MOABB MotorImagery paradigm)
+- window: **2–6s MI** (BCIIV-2a canonical)  
+  - MOABB `MotorImagery` uses `tmin/tmax` **relative to the dataset task interval** (`dataset.interval[0]`).  
+  - For `BNCI2014_001`, `dataset.interval == [2, 6]` seconds, so **use `tmin=0, tmax=4`** to obtain the **2–6s** window.
 - band-pass: 4–38 Hz
 - CAR (common average reference)
 - channel-wise z-score: **fit on training set only**, applied to val/test
@@ -20,4 +22,3 @@
   - `conda run -n eeg python scripts/train_loso_fold.py --config configs/syncdg_ctm_v1.yaml --target-subject 1 --source-val-subject 2 --device cuda --amp`
 - Debug run (fast sanity):
   - `conda run -n eeg python scripts/train_loso_fold.py --config configs/syncdg_ctm_debug.yaml --target-subject 1 --source-val-subject 2 --device cuda --amp`
-

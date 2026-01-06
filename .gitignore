@@ -6,12 +6,12 @@ __pycache__/
 .idea/
 .vscode/
 
-# Data / caches / outputs
-data/
-outputs/
-runs/
-wandb/
-lightning_logs/
+# Data / caches / outputs (repo-root)
+/data/
+/outputs/
+/runs/
+/wandb/
+/lightning_logs/
 *.ckpt
 *.pt
 *.pth
@@ -19,6 +19,5 @@ lightning_logs/
 *.npy
 
 # Local baseline + papers (reference only; not part of final repo)
-baseline/
-papers/
-
+/baseline/
+/papers/
