@@ -1,7 +1,7 @@
 # Iteration: EMA-CORAL stabilization
 
 - Date: 2026-01-06
-- Git commit: 43c8431
+- Git commit: a968fe2
 - Primary lever: **CORAL** (switch from per-batch covariance to **EMA covariance memory**, optional shrinkage)
 - Motivation (failure-first):
   - Per-fold source-val acc was often high but test acc low; several folds had high NLL/ECE.
