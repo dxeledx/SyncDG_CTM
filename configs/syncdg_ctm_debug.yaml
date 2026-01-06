@@ -58,6 +58,10 @@ model:
 
 dg:
   warmup_epochs: 1
+  coral:
+    momentum: 0.01
+    ridge: 0.001
+    shrinkage: 0.0
   lambda:
     div: 0.01
     orth: 0.1

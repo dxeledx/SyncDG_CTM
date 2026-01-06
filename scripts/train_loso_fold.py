@@ -24,9 +24,10 @@ from syncdg_ctm.data.moabb import MoabbBCIIV2aConfig, get_loso_split_indices, lo
 from syncdg_ctm.data.samplers import BalancedDomainClassBatchSampler, seed_worker
 from syncdg_ctm.data.transforms import ChannelZScore, compute_channel_stats
 from syncdg_ctm.losses import (
+    CovarianceEMAMemory,
     PrototypeEMAMemory,
     cdan_onehot_loss,
-    coral_loss,
+    coral_ema_loss,
     orth_loss,
     proto_alignment_loss,
     supervised_contrastive_loss,
@@ -291,6 +292,14 @@ def main() -> None:
     proto_mem = PrototypeEMAMemory(n_domains=n_domains, n_classes=num_classes, feat_dim=d_out, momentum=0.1).to(
         device=device, dtype=torch.float32
     )
+    coral_cfg = cfg.get("dg", {}).get("coral", {}) or {}
+    cov_mem = CovarianceEMAMemory(
+        n_domains=n_domains,
+        feat_dim=d_out,
+        momentum=float(coral_cfg.get("momentum", 0.01)),
+        ridge=float(coral_cfg.get("ridge", 1e-3)),
+        shrinkage=float(coral_cfg.get("shrinkage", 0.0)),
+    ).to(device=device, dtype=torch.float32)
 
     lr = float(cfg["train"]["optimizer"]["lr"])
     wd = float(cfg["train"]["optimizer"]["weight_decay"])
@@ -384,7 +393,7 @@ def main() -> None:
                         x_star, y, d, disc, n_classes=num_classes, grl_lambda=1.0, sample_weight=w_ent
                     )
                     loss_proto, _ = proto_alignment_loss(x_star, y, d, memory=proto_mem)
-                    loss_coral = coral_loss(x_star, d, n_domains=n_domains)
+                    loss_coral = coral_ema_loss(x_star, d, memory=cov_mem)
                     feats_supcon = proj_head(x_star)
                     loss_supcon = supervised_contrastive_loss(feats_supcon, y, temperature=0.1)
                 else:
@@ -468,6 +477,13 @@ def main() -> None:
                     "resolved_model_cfg": resolved_model_cfg,
                     "moabb_cfg": asdict(moabb_cfg),
                     "best_epoch": int(best_epoch),
+                    "coral_mem": {
+                        "cov": cov_mem.cov.detach().cpu(),
+                        "initialized": cov_mem.initialized.detach().cpu(),
+                        "momentum": float(cov_mem.momentum),
+                        "ridge": float(cov_mem.ridge),
+                        "shrinkage": float(cov_mem.shrinkage),
+                    },
                 },
                 best_path,
             )
