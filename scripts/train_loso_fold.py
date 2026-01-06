@@ -175,6 +175,12 @@ def main() -> None:
     parser.add_argument("--config", type=str, default="configs/syncdg_ctm_v1.yaml")
     parser.add_argument("--target-subject", type=int, required=True, help="Held-out test subject id (1..9)")
     parser.add_argument("--source-val-subject", type=int, default=None, help="One source subject used as val (LOSO-in-source)")
+    parser.add_argument(
+        "--run-dir",
+        type=str,
+        default=None,
+        help="If set, write all outputs into this directory (recommended when running full LOSO).",
+    )
     parser.add_argument("--outdir", type=str, default="outputs/runs")
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--num-workers", type=int, default=4)
@@ -188,9 +194,13 @@ def main() -> None:
     device = _device_from_arg(args.device)
     amp_enabled = bool(args.amp and device.type == "cuda")
 
-    run_dir = Path(args.outdir) / f"{_now_tag()}_t{args.target_subject}_v{args.source_val_subject or 'auto'}"
+    if args.run_dir is not None:
+        run_dir = Path(args.run_dir)
+    else:
+        run_dir = Path(args.outdir) / f"{_now_tag()}_t{args.target_subject}_v{args.source_val_subject or 'auto'}"
     run_dir.mkdir(parents=True, exist_ok=True)
     dump_yaml(cfg, run_dir / "config.yaml")
+    print(f"[fold] target={args.target_subject} source_val={args.source_val_subject} device={device} run_dir={run_dir}", flush=True)
 
     # Data
     data_cfg = cfg["data"]
@@ -311,6 +321,7 @@ def main() -> None:
     best_val = -math.inf
     best_path = run_dir / "best.pt"
     bad_epochs = 0
+    best_epoch = 0
 
     for epoch in range(epochs):
         model.train()
@@ -329,7 +340,14 @@ def main() -> None:
         lambda_coral = lambda_coral_max * ramp
         lambda_supcon = lambda_supcon_max * ramp
 
-        pbar = tqdm(train_loader, desc=f"epoch {epoch+1}/{epochs}", ncols=120)
+        pbar = tqdm(
+            train_loader,
+            desc=f"epoch {epoch+1}/{epochs}",
+            ncols=120,
+            dynamic_ncols=True,
+            leave=False,
+            disable=not os.isatty(1),
+        )
         for batch in pbar:
             x = batch["x"].to(device)
             y = batch["y"].to(device)
@@ -356,8 +374,14 @@ def main() -> None:
                 loss_orth = orth_loss(model.head.proj)
 
                 if ramp > 0.0:
+                    # CDAN-E style entropy conditioning (stop-grad) to down-weight uncertain samples.
+                    p_star = p_ticks[torch.arange(x.shape[0], device=device), tau_star]
+                    ent = -(p_star * torch.log(p_star + 1e-8)).sum(dim=1)
+                    ent_max = math.log(num_classes)
+                    w_ent = (1.0 - ent / ent_max).clamp(0.0, 1.0).detach()
+
                     loss_adv = cdan_onehot_loss(
-                        x_star, y, d, disc, n_classes=num_classes, grl_lambda=1.0, sample_weight=None
+                        x_star, y, d, disc, n_classes=num_classes, grl_lambda=1.0, sample_weight=w_ent
                     )
                     loss_proto, _ = proto_alignment_loss(x_star, y, d, memory=proto_mem)
                     loss_coral = coral_loss(x_star, d, n_domains=n_domains)
@@ -425,11 +449,13 @@ def main() -> None:
         )
         with (run_dir / "val_metrics.json").open("a", encoding="utf-8") as f:
             f.write(json.dumps({"epoch": epoch + 1, **val_metrics}, ensure_ascii=False) + "\n")
+        print(f"[epoch {epoch+1}] val_acc={val_metrics['acc']:.4f} val_kappa={val_metrics['kappa']:.4f}", flush=True)
 
         val_acc = float(val_metrics["acc"])
         if val_acc > best_val:
             best_val = val_acc
             bad_epochs = 0
+            best_epoch = epoch + 1
             torch.save(
                 {
                     "model": model.state_dict(),
@@ -441,6 +467,7 @@ def main() -> None:
                     "train_subjects": train_subjects,
                     "resolved_model_cfg": resolved_model_cfg,
                     "moabb_cfg": asdict(moabb_cfg),
+                    "best_epoch": int(best_epoch),
                 },
                 best_path,
             )
@@ -469,10 +496,11 @@ def main() -> None:
         "source_val_subject": int(args.source_val_subject) if args.source_val_subject is not None else None,
         "train_subjects": train_subjects,
         "best_val_acc": float(best_val),
+        "best_epoch": int(best_epoch),
         "test": test_metrics,
     }
     (run_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
 
 
 if __name__ == "__main__":

@@ -20,5 +20,7 @@
 ## Commands
 - One outer fold:
   - `conda run -n eeg python scripts/train_loso_fold.py --config configs/syncdg_ctm_v1.yaml --target-subject 1 --source-val-subject 2 --device cuda --amp`
+- Full LOSO (one experiment folder contains all folds):
+  - `conda run -n eeg python scripts/run_loso.py --config configs/syncdg_ctm_v1.yaml --device cuda --amp`
 - Debug run (fast sanity):
   - `conda run -n eeg python scripts/train_loso_fold.py --config configs/syncdg_ctm_debug.yaml --target-subject 1 --source-val-subject 2 --device cuda --amp`
