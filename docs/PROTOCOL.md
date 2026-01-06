@@ -1,0 +1,23 @@
+# Protocol (Strict DG, LOSO)
+
+## Dataset
+- **BCI Competition IV-2a** via **MOABB**: `BNCI2014_001`
+- 9 subjects, 4 MI classes, 22 channels, 250 Hz
+
+## Main setting (Strict Domain Generalization)
+- **Outer split**: LOSO (leave one subject out as *target test*).
+- **Training**: only source subjects (no target data, no target statistics).
+- **Inner split for early-stopping / model selection**: leave-one-*source*-subject-out (a held-out source subject as *source-val*).
+
+## Preprocessing
+- window: 2–6s (relative to cue, per MOABB MotorImagery paradigm)
+- band-pass: 4–38 Hz
+- CAR (common average reference)
+- channel-wise z-score: **fit on training set only**, applied to val/test
+
+## Commands
+- One outer fold:
+  - `conda run -n eeg python scripts/train_loso_fold.py --config configs/syncdg_ctm_v1.yaml --target-subject 1 --source-val-subject 2 --device cuda --amp`
+- Debug run (fast sanity):
+  - `conda run -n eeg python scripts/train_loso_fold.py --config configs/syncdg_ctm_debug.yaml --target-subject 1 --source-val-subject 2 --device cuda --amp`
+

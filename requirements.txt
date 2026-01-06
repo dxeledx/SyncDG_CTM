@@ -1,0 +1,13 @@
+numpy
+scipy
+pandas
+scikit-learn
+tqdm
+pyyaml
+einops
+
+mne
+moabb
+
+torch
+
