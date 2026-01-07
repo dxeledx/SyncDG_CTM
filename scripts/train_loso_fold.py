@@ -325,6 +325,7 @@ def main() -> None:
     epochs = int(cfg["train"]["epochs"])
     warmup_epochs = int(cfg["dg"]["warmup_epochs"])
     patience = int(cfg["train"]["early_stop_patience"])
+    min_ckpt_epoch = int(cfg.get("train", {}).get("min_ckpt_epoch", 1))
 
     lmb = cfg["dg"]["lambda"]
     lambda_div = float(lmb["div"])
@@ -511,6 +512,11 @@ def main() -> None:
             max_val_acc = val_acc
             max_val_acc_epoch = epoch + 1
 
+        # Burn-in: avoid selecting trivial early checkpoints (e.g., near-uniform predictions minimizing NLL).
+        if epoch + 1 < min_ckpt_epoch:
+            bad_epochs = 0
+            continue
+
         # DG model selection: choose checkpoint by **min source-val NLL**.
         if val_nll < best_val_nll:
             best_val_nll = val_nll
@@ -545,6 +551,12 @@ def main() -> None:
 
         if bad_epochs >= patience:
             break
+
+    if not best_path.exists():
+        raise RuntimeError(
+            f"No checkpoint was saved (best_path={best_path}). "
+            f"Check that train.min_ckpt_epoch <= train.epochs (min_ckpt_epoch={min_ckpt_epoch}, epochs={epochs})."
+        )
 
     ckpt = torch.load(best_path, map_location=device)
     model.load_state_dict(ckpt["model"])
