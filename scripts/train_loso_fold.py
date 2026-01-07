@@ -326,6 +326,15 @@ def main() -> None:
     warmup_epochs = int(cfg["dg"]["warmup_epochs"])
     patience = int(cfg["train"]["early_stop_patience"])
     min_ckpt_epoch = int(cfg.get("train", {}).get("min_ckpt_epoch", 1))
+    ckpt_metric = str(cfg.get("train", {}).get("ckpt_metric", "nll")).lower()
+    if ckpt_metric in ("nll", "val_nll", "loss"):
+        ckpt_metric = "nll"
+    elif ckpt_metric in ("acc", "val_acc", "accuracy"):
+        ckpt_metric = "acc"
+    elif ckpt_metric in ("acc_then_nll", "acc_then_loss", "acc+nll"):
+        ckpt_metric = "acc_then_nll"
+    else:
+        raise ValueError(f"Unknown train.ckpt_metric={ckpt_metric!r} (expected: nll|acc|acc_then_nll)")
 
     lmb = cfg["dg"]["lambda"]
     lambda_div = float(lmb["div"])
@@ -339,7 +348,7 @@ def main() -> None:
     tau_L = float(cfg["early_exit"]["tau_L"])
 
     best_val_nll = math.inf
-    best_val_acc = 0.0
+    best_val_acc = -math.inf
     max_val_acc = -math.inf
     max_val_acc_epoch = 0
     best_path = run_dir / "best.pt"
@@ -517,8 +526,19 @@ def main() -> None:
             bad_epochs = 0
             continue
 
-        # DG model selection: choose checkpoint by **min source-val NLL**.
-        if val_nll < best_val_nll:
+        # DG model selection (configurable):
+        # - nll: minimize source-val NLL
+        # - acc: maximize source-val accuracy
+        # - acc_then_nll: maximize acc, tie-break by min NLL
+        improved = False
+        if ckpt_metric == "nll":
+            improved = val_nll < best_val_nll
+        elif ckpt_metric == "acc":
+            improved = (val_acc > best_val_acc) or (val_acc == best_val_acc and val_nll < best_val_nll)
+        elif ckpt_metric == "acc_then_nll":
+            improved = (val_acc > best_val_acc) or (val_acc == best_val_acc and val_nll < best_val_nll)
+
+        if improved:
             best_val_nll = val_nll
             best_val_acc = val_acc
             bad_epochs = 0
@@ -536,6 +556,8 @@ def main() -> None:
                     "moabb_cfg": asdict(moabb_cfg),
                     "best_epoch": int(best_epoch),
                     "best_val_nll": float(best_val_nll),
+                    "best_val_acc": float(best_val_acc),
+                    "ckpt_metric": ckpt_metric,
                     "coral_mem": {
                         "cov": cov_mem.cov.detach().cpu(),
                         "initialized": cov_mem.initialized.detach().cpu(),
@@ -579,6 +601,7 @@ def main() -> None:
         "best_val_acc": float(best_val_acc),
         "best_val_nll": float(best_val_nll),
         "best_epoch": int(best_epoch),
+        "ckpt_metric": ckpt_metric,
         "max_val_acc": float(max_val_acc),
         "max_val_acc_epoch": int(max_val_acc_epoch),
         "test": test_metrics,
