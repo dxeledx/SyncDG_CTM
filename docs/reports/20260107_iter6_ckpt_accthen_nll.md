@@ -1,7 +1,7 @@
 # Iteration 6: Checkpoint metric = acc_then_nll (planned)
 
 - Date: 2026-01-07
-- Git commit: (fill after commit)
+- Git commit: 88a2b9c
 - Primary lever: **model selection** — change checkpoint criterion to **lexicographic**:
   - maximize source-val **accuracy**, tie-break by **min source-val NLL** (after `train.min_ckpt_epoch`)
 
@@ -16,4 +16,3 @@
 ```bash
 conda run --no-capture-output -n eeg python scripts/run_loso.py --config configs/syncdg_ctm_v1_accthen_nll_minckpt20.yaml --device cuda --amp --exp-name accthen_nll_minckpt20
 ```
-
