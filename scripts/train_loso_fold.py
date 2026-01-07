@@ -188,6 +188,12 @@ def main() -> None:
     parser.add_argument("--amp", action="store_true")
     args = parser.parse_args()
 
+    # Validation subject: the *next* subject after target (cyclic) unless specified.
+    # For BCIIV-2a (BNCI2014_001), subjects are 1..9.
+    source_val_subject = (
+        int(args.source_val_subject) if args.source_val_subject is not None else (1 if args.target_subject == 9 else args.target_subject + 1)
+    )
+
     cfg = load_yaml(args.config)
     seed = int(cfg.get("seed", 42))
     seed_everything(seed)
@@ -198,10 +204,10 @@ def main() -> None:
     if args.run_dir is not None:
         run_dir = Path(args.run_dir)
     else:
-        run_dir = Path(args.outdir) / f"{_now_tag()}_t{args.target_subject}_v{args.source_val_subject or 'auto'}"
+        run_dir = Path(args.outdir) / f"{_now_tag()}_t{args.target_subject}_v{source_val_subject:02d}"
     run_dir.mkdir(parents=True, exist_ok=True)
     dump_yaml(cfg, run_dir / "config.yaml")
-    print(f"[fold] target={args.target_subject} source_val={args.source_val_subject} device={device} run_dir={run_dir}", flush=True)
+    print(f"[fold] target={args.target_subject} source_val={source_val_subject} device={device} run_dir={run_dir}", flush=True)
 
     # Data
     data_cfg = cfg["data"]
@@ -215,7 +221,7 @@ def main() -> None:
         cache_dir=str(data_cfg.get("cache_dir", "outputs/cache")),
     )
     x_all, y_all, subj_all = load_bnci2014_001(moabb_cfg)
-    split = get_loso_split_indices(subj_all, target_subject=args.target_subject, source_val_subject=args.source_val_subject)
+    split = get_loso_split_indices(subj_all, target_subject=args.target_subject, source_val_subject=source_val_subject)
 
     x_train = x_all[split["train"]]
     y_train = y_all[split["train"]]
@@ -327,7 +333,10 @@ def main() -> None:
 
     tau_L = float(cfg["early_exit"]["tau_L"])
 
-    best_val = -math.inf
+    best_val_nll = math.inf
+    best_val_acc = 0.0
+    max_val_acc = -math.inf
+    max_val_acc_epoch = 0
     best_path = run_dir / "best.pt"
     bad_epochs = 0
     best_epoch = 0
@@ -458,11 +467,22 @@ def main() -> None:
         )
         with (run_dir / "val_metrics.json").open("a", encoding="utf-8") as f:
             f.write(json.dumps({"epoch": epoch + 1, **val_metrics}, ensure_ascii=False) + "\n")
-        print(f"[epoch {epoch+1}] val_acc={val_metrics['acc']:.4f} val_kappa={val_metrics['kappa']:.4f}", flush=True)
+        print(
+            f"[epoch {epoch+1}] val_acc={val_metrics['acc']:.4f} val_nll={val_metrics['nll']:.4f} val_kappa={val_metrics['kappa']:.4f}",
+            flush=True,
+        )
 
         val_acc = float(val_metrics["acc"])
-        if val_acc > best_val:
-            best_val = val_acc
+        val_nll = float(val_metrics["nll"])
+
+        if val_acc > max_val_acc:
+            max_val_acc = val_acc
+            max_val_acc_epoch = epoch + 1
+
+        # DG model selection: choose checkpoint by **min source-val NLL**.
+        if val_nll < best_val_nll:
+            best_val_nll = val_nll
+            best_val_acc = val_acc
             bad_epochs = 0
             best_epoch = epoch + 1
             torch.save(
@@ -472,11 +492,12 @@ def main() -> None:
                     "proj_head": proj_head.state_dict(),
                     "seed": seed,
                     "target_subject": int(args.target_subject),
-                    "source_val_subject": int(args.source_val_subject) if args.source_val_subject is not None else None,
+                    "source_val_subject": int(source_val_subject),
                     "train_subjects": train_subjects,
                     "resolved_model_cfg": resolved_model_cfg,
                     "moabb_cfg": asdict(moabb_cfg),
                     "best_epoch": int(best_epoch),
+                    "best_val_nll": float(best_val_nll),
                     "coral_mem": {
                         "cov": cov_mem.cov.detach().cpu(),
                         "initialized": cov_mem.initialized.detach().cpu(),
@@ -509,10 +530,13 @@ def main() -> None:
 
     summary = {
         "target_subject": int(args.target_subject),
-        "source_val_subject": int(args.source_val_subject) if args.source_val_subject is not None else None,
+        "source_val_subject": int(source_val_subject),
         "train_subjects": train_subjects,
-        "best_val_acc": float(best_val),
+        "best_val_acc": float(best_val_acc),
+        "best_val_nll": float(best_val_nll),
         "best_epoch": int(best_epoch),
+        "max_val_acc": float(max_val_acc),
+        "max_val_acc_epoch": int(max_val_acc_epoch),
         "test": test_metrics,
     }
     (run_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

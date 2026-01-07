@@ -49,7 +49,9 @@ def main() -> None:
     fold_summaries = []
     for target in targets:
         if args.source_val_subject is None:
-            val = next(s for s in range(1, 10) if s != target)
+            # Validation subject: the *next* subject after target (cyclic).
+            # For BCIIV-2a (BNCI2014_001), subjects are 1..9.
+            val = 1 if target == 9 else (target + 1)
         else:
             val = int(args.source_val_subject)
 
