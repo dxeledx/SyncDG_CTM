@@ -172,6 +172,9 @@ def build_model(cfg: dict) -> tuple[SyncDGCTM, dict]:
 
 
 def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default="configs/syncdg_ctm_v1.yaml")
     parser.add_argument("--target-subject", type=int, required=True, help="Held-out test subject id (1..9)")
@@ -196,7 +199,8 @@ def main() -> None:
 
     cfg = load_yaml(args.config)
     seed = int(cfg.get("seed", 42))
-    seed_everything(seed)
+    deterministic = bool(cfg.get("train", {}).get("deterministic", False))
+    seed_everything(seed, deterministic=deterministic)
 
     device = _device_from_arg(args.device)
     amp_enabled = bool(args.amp and device.type == "cuda")
@@ -358,15 +362,18 @@ def main() -> None:
         lambda_coral = lambda_coral_max * ramp
         lambda_supcon = lambda_supcon_max * ramp
 
+        use_tqdm = os.isatty(1)
+        log_every = int(cfg.get("train", {}).get("log_every", 50))
+
         pbar = tqdm(
             train_loader,
             desc=f"epoch {epoch+1}/{epochs}",
             ncols=120,
             dynamic_ncols=True,
             leave=False,
-            disable=not os.isatty(1),
+            disable=not use_tqdm,
         )
-        for batch in pbar:
+        for step, batch in enumerate(pbar, start=1):
             x = batch["x"].to(device)
             y = batch["y"].to(device)
             d = batch["domain"].to(device)
@@ -385,7 +392,19 @@ def main() -> None:
                 loss_cls = F.nll_loss(torch.log(p_agg + 1e-8), y)
 
                 t = x_ticks.shape[1]
-                tau_star = torch.randint(0, t, (x.shape[0],), device=device)
+                tick_sampling = str(cfg.get("dg", {}).get("tick_sampling", "uniform")).lower()
+                if tick_sampling == "uniform":
+                    tau_star = torch.randint(0, t, (x.shape[0],), device=device)
+                elif tick_sampling in ("w_pred", "wpred"):
+                    # Sample the tick using the (detached) reliability weights.
+                    w = w_pred.clamp_min(1e-8)
+                    tau_star = torch.multinomial(w, num_samples=1, replacement=True).squeeze(1)
+                elif tick_sampling in ("argmax", "max"):
+                    tau_star = w_pred.argmax(dim=1)
+                elif tick_sampling == "last":
+                    tau_star = torch.full((x.shape[0],), t - 1, device=device, dtype=torch.long)
+                else:
+                    raise ValueError(f"Unknown dg.tick_sampling={tick_sampling!r} (expected: uniform|w_pred|argmax|last)")
                 x_star = x_ticks[torch.arange(x.shape[0], device=device), tau_star]
 
                 loss_div = tick_diversity_loss(z_ticks)
@@ -444,17 +463,30 @@ def main() -> None:
             (lambda_teach * loss_teach).backward()
             opt_g.step()
 
-            pbar.set_postfix(
-                {
-                    "cls": float(loss_cls.detach().cpu()),
-                    "adv": float(loss_adv.detach().cpu()),
-                    "proto": float(loss_proto.detach().cpu()),
-                    "coral": float(loss_coral.detach().cpu()),
-                    "supcon": float(loss_supcon.detach().cpu()),
-                    "div": float(loss_div.detach().cpu()),
-                    "ramp": float(ramp),
-                }
+            metrics_str = (
+                f"cls={float(loss_cls.detach().cpu()):.4f} "
+                f"adv={float(loss_adv.detach().cpu()):.4f} "
+                f"proto={float(loss_proto.detach().cpu()):.4f} "
+                f"coral={float(loss_coral.detach().cpu()):.4f} "
+                f"supcon={float(loss_supcon.detach().cpu()):.4f} "
+                f"div={float(loss_div.detach().cpu()):.4f} "
+                f"ramp={float(ramp):.3f}"
             )
+
+            if use_tqdm:
+                pbar.set_postfix(
+                    {
+                        "cls": float(loss_cls.detach().cpu()),
+                        "adv": float(loss_adv.detach().cpu()),
+                        "proto": float(loss_proto.detach().cpu()),
+                        "coral": float(loss_coral.detach().cpu()),
+                        "supcon": float(loss_supcon.detach().cpu()),
+                        "div": float(loss_div.detach().cpu()),
+                        "ramp": float(ramp),
+                    }
+                )
+            elif step == 1 or step % log_every == 0:
+                print(f"[epoch {epoch+1} step {step}/{len(train_loader)}] {metrics_str}", flush=True)
 
         val_metrics = evaluate(
             model,

@@ -67,7 +67,6 @@ class MultiScaleTokenizer(nn.Module):
             nn.Dropout(cfg.dropout),
         )
 
-        self.pool = nn.AdaptiveAvgPool2d((1, cfg.n_tokens))
         self.ln = nn.LayerNorm(cfg.d_token)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -85,7 +84,13 @@ class MultiScaleTokenizer(nn.Module):
         h = torch.cat(feats, dim=1)  # (B,F*Ms,C,T)
         h = self.spatial(h)  # (B,F*Ms,1,T)
         h = self.mix(h)  # (B,d_token,1,T)
-        h = self.pool(h)  # (B,d_token,1,L)
-        tokens = h.squeeze(2).transpose(1, 2).contiguous()  # (B,L,d_token)
-        return self.ln(tokens)
+        h = h.squeeze(2)  # (B,d_token,T)
 
+        # Deterministic temporal pooling into L=n_tokens segments.
+        t = int(h.shape[-1])
+        l = int(self.cfg.n_tokens)
+        boundaries = [int(i * t // l) for i in range(l + 1)]
+        lengths = [boundaries[i + 1] - boundaries[i] for i in range(l)]
+        chunks = torch.split(h, lengths, dim=-1)  # tuple[(B,d_token,Ti)]
+        tokens = torch.stack([c.mean(dim=-1) for c in chunks], dim=1)  # (B,L,d_token)
+        return self.ln(tokens)

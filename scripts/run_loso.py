@@ -20,6 +20,9 @@ def _now_tag() -> str:
 
 
 def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default="configs/syncdg_ctm_v1.yaml")
     parser.add_argument("--outdir", type=str, default="outputs/experiments")
