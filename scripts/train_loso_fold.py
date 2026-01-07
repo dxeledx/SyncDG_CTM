@@ -399,7 +399,13 @@ def main() -> None:
 
                 w_pred = out["w_pred"].detach()  # no grad to g from cls
                 p_agg = (w_pred.unsqueeze(-1) * p_ticks).sum(dim=1)
-                loss_cls = F.nll_loss(torch.log(p_agg + 1e-8), y)
+                log_p_agg = torch.log(p_agg + 1e-8)
+                label_smoothing = float(cfg.get("train", {}).get("label_smoothing", 0.0))
+                if label_smoothing > 0.0:
+                    # Treat log-probabilities as logits (log_softmax(log_p)=log_p because sum(p)=1).
+                    loss_cls = F.cross_entropy(log_p_agg, y, label_smoothing=label_smoothing)
+                else:
+                    loss_cls = F.nll_loss(log_p_agg, y)
 
                 t = x_ticks.shape[1]
                 tick_sampling = str(cfg.get("dg", {}).get("tick_sampling", "uniform")).lower()

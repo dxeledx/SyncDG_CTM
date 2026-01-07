@@ -1,0 +1,81 @@
+seed: 42
+
+data:
+  dataset: BNCI2014_001
+  # MOABB tmin/tmax are relative to dataset.interval[0] (BNCI2014_001 interval is [2,6]).
+  # So tmin=0,tmax=4 corresponds to the 2–6s MI window.
+  tmin: 0.0
+  tmax: 4.0
+  fmin: 4.0
+  fmax: 38.0
+  resample: null
+  apply_car: true
+  zscore: true
+  cache_dir: outputs/cache
+
+train:
+  epochs: 3
+  steps_per_epoch: 3
+  grad_clip: 1.0
+  early_stop_patience: 2
+  min_ckpt_epoch: 2
+  ckpt_metric: acc_then_nll
+  label_smoothing: 0.1
+  log_every: 1
+
+  batch:
+    domains_per_batch: 4
+    samples_per_class: 1
+
+  optimizer:
+    lr: 1.0e-3
+    weight_decay: 1.0e-2
+
+  scheduler:
+    warmup_epochs: 0
+
+model:
+  num_classes: 4
+
+  tokenizer:
+    d_token: 64
+    n_tokens: 16
+    temporal_kernels: [63, 125, 250]
+    dropout: 0.1
+
+  ctm:
+    d_model: 128
+    n_ticks: 4
+    memory_len: 8
+    attn_heads: 4
+    synapse_hidden: 256
+    nlm_hidden: 64
+    neuron_embed_dim: 16
+    dropout: 0.1
+
+  sync_head:
+    d_out: 32
+    gamma: 0.9
+    welford_shrinkage: 0.1
+    eps: 1.0e-5
+    eps_h: 1.0e-6
+
+dg:
+  warmup_epochs: 1
+  coral:
+    momentum: 0.01
+    ridge: 0.001
+    shrinkage: 0.0
+  lambda:
+    div: 0.01
+    orth: 0.1
+    adv: 0.5
+    proto: 0.1
+    coral: 0.05
+    supcon: 0.1
+    teach: 1.0
+
+early_exit:
+  tau_g: 1.0
+  tau_L: 1.0
+
